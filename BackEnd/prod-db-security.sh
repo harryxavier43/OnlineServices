@@ -16,37 +16,8 @@ NC='\033[0m'
 log() {
     echo -e "${GREEN}${ELEPHANT} $1${NC}"
 }
-# --- POSTGRESQL FUNCTIONS ---
 
-install_postgresql() {
-    log "Installing PostgreSQL..."
-    sudo apt-get install -y postgresql postgresql-contrib
-}
-
-configure_postgresql() {
-    log "Configuring PostgreSQL for remote access..."
-    
-    # Allow PostgreSQL to listen on all interfaces
-    sudo -u postgres psql -c "ALTER SYSTEM SET listen_addresses TO '*';"
-    
-    # Find the correct PostgreSQL configuration directory
-    PG_VERSION=$(ls /etc/postgresql)
-    PG_CONF_DIR="/etc/postgresql/${PG_VERSION}/main"
-    
-    # Backup the original pg_hba.conf file
-    sudo cp "${PG_CONF_DIR}/pg_hba.conf" "${PG_CONF_DIR}/pg_hba.conf.bak"
-    
-    # Add rules to pg_hba.conf to allow connections
-    sudo tee -a "${PG_CONF_DIR}/pg_hba.conf" > /dev/null <<EOF
-# Allow connections from the private network (adjust as needed)
-host    all             all             10.0.0.0/24            scram-sha-256
-# Allow connections from all IP addresses (use with caution, consider removing in production)
-host    all             all             0.0.0.0/0               scram-sha-256
-host    all             all             ::/0                    scram-sha-256
-EOF
-    
-    sudo systemctl restart postgresql
-}
+# --- SECURITY FUNCTIONS ---
 
 configure_firewall() {
     log "Configuring the firewall with ufw..."
@@ -58,6 +29,58 @@ configure_firewall() {
     echo "y" | sudo ufw enable
 }
 
+harden_ssh() {
+    log "Hardening SSH configuration..."
+    sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
+    sudo tee /etc/ssh/sshd_config > /dev/null <<EOF
+Port 22
+Protocol 2
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+UsePrivilegeSeparation yes
+KeyRegenerationInterval 3600
+ServerKeyBits 1024
+SyslogFacility AUTH
+LogLevel INFO
+LoginGraceTime 120
+PermitRootLogin prohibit-password
+StrictModes yes
+RSAAuthentication yes
+PubkeyAuthentication yes
+IgnoreRhosts yes
+RhostsRSAAuthentication no
+HostbasedAuthentication no
+PermitEmptyPasswords no
+ChallengeResponseAuthentication no
+PasswordAuthentication no
+PermitUserEnvironment no
+X11Forwarding no
+X11DisplayOffset 10
+PrintMotd no
+PrintLastLog yes
+TCPKeepAlive yes
+AcceptEnv LANG LC_*
+Subsystem sftp /usr/lib/openssh/sftp-server
+UsePAM yes
+MaxAuthTries 6
+AllowUsers root postgres
+EOF
+    sudo systemctl restart ssh.service
+}
+
+setup_fail2ban() {
+    log "Installing and configuring fail2ban..."
+    sudo apt-get install -y fail2ban
+    sudo cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
+    sudo sed -i 's/bantime  = 10m/bantime  = 1h/' /etc/fail2ban/jail.local
+    sudo sed -i 's/findtime  = 10m/findtime  = 30m/' /etc/fail2ban/jail.local
+    sudo sed -i 's/maxretry = 5/maxretry = 3/' /etc/fail2ban/jail.local
+    sudo systemctl enable fail2ban
+    sudo systemctl start fail2ban
+}
+
+
 # --- MAIN SCRIPT ---
 
 # Update and upgrade packages
@@ -65,14 +88,13 @@ log "Updating and upgrading packages..."
 sudo apt-get update -y
 sudo apt-get upgrade -y
 
-# Install essential packages
-log "Installing required packages..."
-sudo apt-get install -y git build-essential libssl-dev libreadline-dev zlib1g-dev
-
-
-install_postgresql
-configure_postgresql
+# Configure security
 configure_firewall
+harden_ssh
+setup_fail2ban
+
+# Set hostname
+sudo hostnamectl set-hostname ubuntu-postgresql-production
 
 # --- CLEANUP AND FINALIZATION ---
 
