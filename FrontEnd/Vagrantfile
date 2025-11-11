@@ -1,18 +1,41 @@
-# -*- mode: ruby -*-
-# vi: set ft=ruby :
-
 Vagrant.configure("2") do |config|
-
   config.vm.box = "bento/ubuntu-24.04"
 
   config.vm.box_version = "202510.26.0"
 
   config.vm.network "private_network", ip: "192.168.33.11"
-  
-  config.vm.provider "virtualbox" do |vb|
-     vb.gui = true
-     vb.memory = "2048"
-     vb.name = "WebServer"
+
+  config.vm.provider :virtualbox do |v|
+    v.gui = true
+    v.cpus = 2
+    v.memory = 4096
+    v.name = "WebServer"
+
+    # Graphics optimizations
+    v.customize ["modifyvm", :id, "--vram=128"]
+    v.customize ["modifyvm", :id, "--accelerate-3d=on"]
+    v.customize ["setextradata", :id, "GUI/LastGuestSizeHint", "1280,720"]
+
+    # Convenience features
+    v.customize ["modifyvm", :id, "--clipboard", "bidirectional"]
+    v.customize ["modifyvm", :id, "--draganddrop", "bidirectional"]
+
+    # Network optimization
+    v.default_nic_type = "virtio"
   end
-  
+
+  # Package caching for faster rebuilds
+  cache_dir = File.expand_path("tmp/vagrant-cache")
+  FileUtils.mkdir_p(cache_dir) unless File.directory?(cache_dir)
+
+  config.vm.synced_folder File.join(cache_dir, "apt"), "/var/cache/apt/archives",
+    type: "virtualbox", create: true, owner: "root", group: "root",
+    mount_options: ["dmode=755", "fmode=644"]
+
+  #config.vm.provision :shell, path: "setup/dev-env.sh"
+
+  #config.vm.provision :shell, path: "setup/setup-ror.sh"
+
+  #config.vm.provision :shell, path: "setup/test-db.sh"
+    
 end
